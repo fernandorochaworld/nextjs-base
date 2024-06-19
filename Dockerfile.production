@@ -1,0 +1,63 @@
+
+# Install dependencies only when needed
+FROM node:20.13.1-alpine3.20 AS deps
+
+ENV NODE_ENV=production
+
+# Check
+RUN apt add --no-cache libc6-compat
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm install --production --frozen-lockfile
+
+
+
+# Rebuild the source code only when needed
+FROM node:20.13.1-alpine3.20 AS builder
+
+ENV NODE_ENV=production
+
+WORKDIR /app
+
+COPY package*.json ./
+COPY next.config.mjs ./next.config.mjs
+
+COPY --from=deps /app/node_modules ./node_modules
+
+COPY tsconfig.json ./tsconfig.json
+COPY .eslintrc.json ./.eslintrc.json
+COPY postcss.config.mjs ./postcss.config.mjs
+COPY tailwind.config.ts ./tailwind.config.ts
+
+COPY src ./src
+COPY public ./public
+
+RUN npm run build
+
+
+
+# Production image, copy all the files and run next
+FROM node:20.13.1-alpine3.20 AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+# Uncomment the following like in case you want to disable the telemetry during runtime
+# ENV NEXT_TELEMETRY_DISABLED=1
+
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nodejs
+
+# You only need to copy next.config.mjs if you are NOT using the default configuration
+# COPY --from=builder /app/next.config.mjs ./
+COPY --from=builder /app/public ./public
+
+
+COPY --from=builder --chown=nodejs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nodejs:nodejs /app/.next/static ./.next/static
+
+
+USER nextjs
+
+CMD [ "node", "server.js" ]
